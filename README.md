@@ -82,13 +82,14 @@ the normal file's `build: context: .` has nothing to build from, and its
 instead of this project. The Arcane variant fixes both: it runs a pre-built
 image and takes absolute host paths.
 
-### 1. Build the image on the Docker host
+### 1. Get an image
 
-The UI can't build it, so do this once over SSH or in a terminal on that box:
+The UI can't build one. Either let CI publish it (below), or build it once on
+the host:
 
 ```fish
-git clone <your repo> /opt/discord-bot-src   # or copy the folder across
-cd /opt/discord-bot-src
+git clone https://github.com/ItzLcky/meatload.git /opt/meatload
+cd /opt/meatload
 docker build -t discord-bot:latest .
 ```
 
@@ -121,14 +122,40 @@ the logs for `Connected as …`.
 
 Only needed if you left `DEV_GUILD_IDS` empty: send `!sync` in any channel.
 
+### Using the image CI publishes (recommended)
+
+`.github/workflows/ci.yml` runs the tests on every push and, when they pass on
+`main`, builds the image and publishes it to GitHub Container Registry as
+`ghcr.io/itzlcky/meatload:latest`. That removes the SSH-and-build step entirely:
+push code, then hit redeploy in Arcane.
+
+Because the repo is private, so is the package — the Docker host has to
+authenticate once. Create a token at *Settings → Developer settings → Personal
+access tokens (classic)* with the **`read:packages`** scope, then on the host:
+
+```fish
+echo <token> | docker login ghcr.io -u ItzLcky --password-stdin
+```
+
+Then set two more variables on the stack:
+
+| Variable | Value |
+| --- | --- |
+| `BOT_IMAGE` | `ghcr.io/itzlcky/meatload:latest` |
+| `PULL_POLICY` | `always` |
+
+Don't make the package public to avoid the login — the image contains the bot's
+source, so a public image would publish the code your private repo is keeping in.
+
 ### Notes for UI deployments
 
-- **Updating the code** means rebuilding on the host
-  (`docker build -t discord-bot:latest .`) and then redeploying or recreating
-  the container in Arcane. The UI's "pull latest image" won't help — the image
-  is local and never pushed to a registry, which is also why the file sets
-  `pull_policy: never`. If your manager has an auto-update feature, leave it off
-  for this stack.
+- **Updating the code.** With CI: push to `main`, wait for the run to go green,
+  then redeploy the stack in Arcane (`PULL_POLICY=always` makes it fetch the new
+  image). Building by hand instead: `git pull`, `docker build -t
+  discord-bot:latest .`, then recreate the container. The default
+  `pull_policy: never` exists for that second case — a local image was never
+  pushed anywhere, so an auto-updating manager would just fail trying to pull
+  it.
 - **Updating yt-dlp** does *not* need a rebuild. `YTDLP_AUTO_UPDATE` is on by
   default, so restarting the container from Arcane pulls the newest version.
   That's the fix for most YouTube breakage.
@@ -430,6 +457,9 @@ overwrites can remove even when the server-level role has them.
 make venv     # Python 3.12 venv via uv, matching the container
 make test     # 149 tests, no network or token needed
 ```
+
+The same suite runs in CI on every push and pull request, and a failing run
+blocks the image from being published.
 
 The suite covers the queue and player logic (loop modes, skip, history, the
 playback clock), the XP curve, template rendering, the database layer and its

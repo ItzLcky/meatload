@@ -3,26 +3,36 @@
 # Differences from docker-compose.yml, all because a UI deploys a compose file
 # without the source tree next to it:
 #
-#   * No `build:` — the image is built once on the host beforehand. A pasted
-#     stack has no Dockerfile or bot/ directory to build from.
+#   * No `build:` — a pasted stack has no Dockerfile or bot/ directory to build
+#     from, so the image comes either from GitHub Actions (see BOT_IMAGE below)
+#     or from a one-off `docker build` on the host.
 #   * Absolute host paths instead of ./data and ./cookies, which would otherwise
 #     resolve against the manager's own stack directory.
 #   * Settings are listed under `environment:` rather than read from a .env file,
 #     so they show up in the UI's variable editor and don't depend on where the
 #     manager happens to put .env.
 #
-# Build the image on the Docker host first:
-#   cd /path/to/DiscordBot && docker build -t discord-bot:latest .
+# Two ways to get the image:
+#
+#   A. Published by CI (recommended) — every push to main builds it. Set:
+#        BOT_IMAGE=ghcr.io/itzlcky/meatload:latest
+#        PULL_POLICY=always
+#      The host needs `docker login ghcr.io` once; see the README.
+#
+#   B. Built by hand on the Docker host:
+#        cd /path/to/meatload && docker build -t discord-bot:latest .
+#      The defaults below already match this.
 
 services:
   bot:
-    image: discord-bot:latest
+    image: ${BOT_IMAGE:-discord-bot:latest}
     container_name: discord-bot
     restart: unless-stopped
 
-    # The image is local, never pushed to a registry. Without this, a manager
-    # with auto-update enabled will try to pull it and fail.
-    pull_policy: never
+    # `never` suits a locally-built image that was never pushed anywhere: it
+    # stops an auto-updating manager from trying to pull it and failing. Switch
+    # to `always` alongside a registry BOT_IMAGE so updates actually arrive.
+    pull_policy: ${PULL_POLICY:-never}
 
     # Must match the owner of DATA_DIR on the host, or the bot cannot write its
     # database. The container refuses to start with a message telling you what
