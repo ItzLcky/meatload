@@ -129,13 +129,27 @@ Only needed if you left `DEV_GUILD_IDS` empty: send `!sync` in any channel.
 `ghcr.io/itzlcky/meatload:latest`. That removes the SSH-and-build step entirely:
 push code, then hit redeploy in Arcane.
 
-Because the repo is private, so is the package — the Docker host has to
-authenticate once. Create a token at *Settings → Developer settings → Personal
-access tokens (classic)* with the **`read:packages`** scope, then on the host:
+Because the repo is private, so is the package, so whatever pulls it has to
+authenticate. Create a token at *Settings → Developer settings → Personal access
+tokens (classic)* with the **`read:packages`** scope — that single scope is all a
+pull needs. Use a **classic** token: fine-grained tokens have had patchy GHCR
+support, and it isn't worth debugging. If a pull still 403s, add read-only
+`repo`, since the package inherits the private repo's permissions.
 
-```fish
-echo <token> | docker login ghcr.io -u ItzLcky --password-stdin
-```
+**Where that token has to live depends on how Arcane runs.** Registry
+credentials come from whatever *asks* the Docker daemon to pull, not from the
+daemon itself:
+
+- **Arcane in a container** (the usual case) — a `docker login` you run as
+  yourself writes `~/.docker/config.json` on the host, which Arcane can't see.
+  Add the registry in Arcane's own settings instead: look for a Registries or
+  Registry Credentials section, and add `ghcr.io` with username `ItzLcky` and
+  the token as the password.
+- **Arcane directly on the host, running as your user** — then this is enough:
+
+  ```fish
+  echo <token> | docker login ghcr.io -u ItzLcky --password-stdin
+  ```
 
 Then set two more variables on the stack:
 
@@ -143,6 +157,10 @@ Then set two more variables on the stack:
 | --- | --- |
 | `BOT_IMAGE` | `ghcr.io/itzlcky/meatload:latest` |
 | `PULL_POLICY` | `always` |
+
+Leaving both unset is what causes `image discord-bot:latest is not available
+locally and pull_policy is set to never` — the defaults assume the
+build-it-yourself route below.
 
 Don't make the package public to avoid the login — the image contains the bot's
 source, so a public image would publish the code your private repo is keeping in.
