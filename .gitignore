@@ -1,0 +1,18 @@
+# Secrets and runtime state. Never commit these.
+.env
+cookies/*
+data/*
+
+# ...but keep the directories themselves, so a fresh clone has them owned by
+# the cloning user. Docker creates a missing bind-mount source as root, which
+# the container (running as PUID) then can't write to.
+!cookies/.gitkeep
+!data/.gitkeep
+
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.py[cod]
+.venv/
+venv/

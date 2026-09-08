@@ -1,0 +1,83 @@
+# Compose file for a Docker management UI (Arcane, Portainer, Dockge, Komodo…).
+#
+# Differences from docker-compose.yml, all because a UI deploys a compose file
+# without the source tree next to it:
+#
+#   * No `build:` — the image is built once on the host beforehand. A pasted
+#     stack has no Dockerfile or bot/ directory to build from.
+#   * Absolute host paths instead of ./data and ./cookies, which would otherwise
+#     resolve against the manager's own stack directory.
+#   * Settings are listed under `environment:` rather than read from a .env file,
+#     so they show up in the UI's variable editor and don't depend on where the
+#     manager happens to put .env.
+#
+# Build the image on the Docker host first:
+#   cd /path/to/DiscordBot && docker build -t discord-bot:latest .
+
+services:
+  bot:
+    image: discord-bot:latest
+    container_name: discord-bot
+    restart: unless-stopped
+
+    # The image is local, never pushed to a registry. Without this, a manager
+    # with auto-update enabled will try to pull it and fail.
+    pull_policy: never
+
+    # Must match the owner of DATA_DIR on the host, or the bot cannot write its
+    # database. The container refuses to start with a message telling you what
+    # to change. Find yours with: id -u  /  id -g
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    volumes:
+      - ${DATA_DIR:-/opt/discord-bot/data}:/app/data
+      - ${COOKIES_DIR:-/opt/discord-bot/cookies}:/app/cookies:ro
+
+    environment:
+      # ── Required ──────────────────────────────────────────────────────────
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in the stack environment}
+
+      # ── Core ──────────────────────────────────────────────────────────────
+      # Your server's ID. Slash commands appear instantly instead of taking an
+      # hour. Right-click the server -> Copy Server ID (needs Developer Mode).
+      DEV_GUILD_IDS: ${DEV_GUILD_IDS:-}
+      OWNER_IDS: ${OWNER_IDS:-}
+      DEFAULT_PREFIX: ${DEFAULT_PREFIX:-!}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_PATH: /app/data/bot.db
+      ACTIVITY_NAME: ${ACTIVITY_NAME:-music with friends}
+      ACTIVITY_TYPE: ${ACTIVITY_TYPE:-listening}
+
+      # ── Music ─────────────────────────────────────────────────────────────
+      # Pulls the newest yt-dlp on every start; a restart fixes most YouTube
+      # breakage without rebuilding the image.
+      YTDLP_AUTO_UPDATE: ${YTDLP_AUTO_UPDATE:-true}
+      MUSIC_IDLE_TIMEOUT: ${MUSIC_IDLE_TIMEOUT:-300}
+      MUSIC_ALONE_TIMEOUT: ${MUSIC_ALONE_TIMEOUT:-60}
+      MUSIC_DEFAULT_VOLUME: ${MUSIC_DEFAULT_VOLUME:-50}
+      MUSIC_MAX_QUEUE: ${MUSIC_MAX_QUEUE:-500}
+      MUSIC_MAX_PLAYLIST: ${MUSIC_MAX_PLAYLIST:-200}
+      # Set to /app/cookies/cookies.txt if YouTube starts asking the bot to
+      # confirm it isn't a bot.
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+      YTDLP_EXTRACTOR_ARGS: ${YTDLP_EXTRACTOR_ARGS:-}
+
+      # ── Optional: lets the bot resolve Spotify links ──────────────────────
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+
+    # No inbound ports: the bot only makes outbound connections to Discord.
+    stop_grace_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if os.path.exists('/app/data/heartbeat') and time.time()-os.path.getmtime('/app/data/heartbeat') < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
