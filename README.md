@@ -93,30 +93,29 @@ cd /opt/meatload
 docker build -t discord-bot:latest .
 ```
 
-### 2. Create the data directories
+### 2. Create the stack
 
-```fish
-sudo mkdir -p /opt/discord-bot/data /opt/discord-bot/cookies
-sudo chown -R (id -u):(id -g) /opt/discord-bot
-id -u; id -g   # note these two numbers for PUID / PGID below
-```
-
-### 3. Create the stack in Arcane
-
-Make a new stack (call it `discord-bot`), paste in the contents of
-`docker-compose.arcane.yml`, and set these variables in the stack's environment
-editor:
+Make a new stack/project, paste in the contents of `docker-compose.arcane.yml`,
+and set these variables in its environment editor:
 
 | Variable | Value |
 | --- | --- |
 | `DISCORD_TOKEN` | your bot token — the stack refuses to start without it |
 | `DEV_GUILD_IDS` | your server ID, so slash commands appear instantly |
-| `PUID` / `PGID` | the numbers from `id -u` / `id -g` above |
-| `DATA_DIR` | `/opt/discord-bot/data` |
-| `COOKIES_DIR` | `/opt/discord-bot/cookies` |
 
-Everything else has a sensible default and can be left alone. Deploy, then watch
-the logs for `Connected as …`.
+That's it. Everything else has a sensible default. There are no host directories
+to create and no PUID/PGID to work out: the file uses named volumes, which
+Docker creates already owned by the user inside the image.
+
+Deploy, then watch the logs for `Connected as …`.
+
+> Don't change the volume lines to a path like `./data` or `meatload/data`. A
+> relative path resolves against the manager's own project directory — which is
+> a path inside *its* container, not one the Docker daemon can bind — and a
+> source with no leading `/` or `./` is read as a named volume, giving
+> `service "bot" refers to undefined volume`. If you do want the database
+> directly on the host, use an absolute path you have created and chowned
+> yourself, and add `user: "1000:1000"` back to match its owner.
 
 ### 4. Sync the slash commands
 
@@ -181,8 +180,10 @@ source, so a public image would publish the code your private repo is keeping in
   exactly which `PUID`/`PGID` to set rather than failing obscurely.
 - **Health** shows in the container list once it's connected — the bot
   refreshes a heartbeat file every 30 seconds.
-- **Backups** are just `cp /opt/discord-bot/data/bot.db somewhere`, or use
-  `/tag export` in Discord for the custom commands specifically.
+- **Backups.** With named volumes the database lives inside Docker rather than
+  at a host path, so copy it out with
+  `docker cp discord-bot:/app/data/bot.db ./bot-backup.db`. `/tag export` in
+  Discord covers the custom commands on their own.
 
 I don't have Arcane here to test against, so the exact menu names may differ
 from what I've described — but "create a stack, paste compose, set environment

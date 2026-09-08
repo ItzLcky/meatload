@@ -1,23 +1,25 @@
 # Compose file for a Docker management UI (Arcane, Portainer, Dockge, Komodo…).
 #
 # Differences from docker-compose.yml, all because a UI deploys a compose file
-# without the source tree next to it:
+# without the source tree next to it and from a working directory you don't
+# control:
 #
 #   * No `build:` — a pasted stack has no Dockerfile or bot/ directory to build
-#     from, so the image comes either from GitHub Actions (see BOT_IMAGE below)
-#     or from a one-off `docker build` on the host.
-#   * Absolute host paths instead of ./data and ./cookies, which would otherwise
-#     resolve against the manager's own stack directory.
-#   * Settings are listed under `environment:` rather than read from a .env file,
-#     so they show up in the UI's variable editor and don't depend on where the
-#     manager happens to put .env.
+#     from, so the image comes from GitHub Actions (see BOT_IMAGE below) or from
+#     a one-off `docker build` on the host.
+#   * Named volumes rather than bind mounts. A relative path like ./data would
+#     resolve against the manager's own project directory, which is a path
+#     inside *its* container and not somewhere the Docker daemon can bind. Named
+#     volumes need no host directory, no chown, and no PUID/PGID at all: Docker
+#     creates them owned by the image's user.
+#   * Settings live under `environment:` rather than in a .env file, so they show
+#     up in the UI's variable editor.
 #
 # Two ways to get the image:
 #
 #   A. Published by CI (recommended) — every push to main builds it. Set:
 #        BOT_IMAGE=ghcr.io/itzlcky/meatload:latest
 #        PULL_POLICY=always
-#      The host needs `docker login ghcr.io` once; see the README.
 #
 #   B. Built by hand on the Docker host:
 #        cd /path/to/meatload && docker build -t discord-bot:latest .
@@ -34,14 +36,16 @@ services:
     # to `always` alongside a registry BOT_IMAGE so updates actually arrive.
     pull_policy: ${PULL_POLICY:-never}
 
-    # Must match the owner of DATA_DIR on the host, or the bot cannot write its
-    # database. The container refuses to start with a message telling you what
-    # to change. Find yours with: id -u  /  id -g
-    user: "${PUID:-1000}:${PGID:-1000}"
+    # No `user:` override on purpose. The image already runs as its own
+    # unprivileged user, and Docker initialises a fresh named volume with that
+    # same ownership, so the bot can write its database with nothing to
+    # configure. Overriding the user here is what makes a bind mount need a
+    # matching chown on the host.
 
     volumes:
-      - ${DATA_DIR:-/opt/discord-bot/data}:/app/data
-      - ${COOKIES_DIR:-/opt/discord-bot/cookies}:/app/cookies:ro
+      - bot-data:/app/data
+      # Optional: only used if you set YTDLP_COOKIES_FILE below.
+      - bot-cookies:/app/cookies
 
     environment:
       # ── Required ──────────────────────────────────────────────────────────
@@ -68,7 +72,8 @@ services:
       MUSIC_MAX_QUEUE: ${MUSIC_MAX_QUEUE:-500}
       MUSIC_MAX_PLAYLIST: ${MUSIC_MAX_PLAYLIST:-200}
       # Set to /app/cookies/cookies.txt if YouTube starts asking the bot to
-      # confirm it isn't a bot.
+      # confirm it isn't a bot. Copy the file in with:
+      #   docker cp cookies.txt discord-bot:/app/cookies/cookies.txt
       YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
       YTDLP_EXTRACTOR_ARGS: ${YTDLP_EXTRACTOR_ARGS:-}
 
@@ -89,5 +94,12 @@ services:
       test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if os.path.exists('/app/data/heartbeat') and time.time()-os.path.getmtime('/app/data/heartbeat') < 120 else 1)"]
       interval: 30s
       timeout: 5s
-      start_period: 60s
+      # The bot has to log in to Discord before it writes its first heartbeat,
+      # so give it room. Health stays "starting", not "unhealthy", until this
+      # elapses.
+      start_period: 90s
       retries: 3
+
+volumes:
+  bot-data:
+  bot-cookies:
