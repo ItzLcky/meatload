@@ -1,7 +1,8 @@
 # Discord Bot
 
 A self-hosted Discord bot for a private server: music, custom commands, moderation,
-welcome messages, self-assign roles, leveling, and the usual small utilities.
+welcome messages, self-assign roles, leveling, a server currency with prediction
+markets, and the usual small utilities.
 
 Runs as a single Docker container. No external services, no database server —
 state lives in one SQLite file you can copy.
@@ -257,6 +258,21 @@ Variables:
 nominate with `/config tagrole @Role`. Tags can never ping `@everyone` or a role,
 whatever their content says, and they never shadow a real command.
 
+**Red's spelling works too.** The whole group answers to `cc` (and `customcom`),
+with Red's subcommand names alongside ours:
+
+```
+!cc list                      # same as !tag all
+!cc add hello Hey {user}!     # same as !tag create
+!cc del hello                 # same as !tag delete
+!cc show hello                # !cc edit, !cc random, !cc import … all work
+```
+
+`!cc add simple hello Hey!` and `!cc add random greet Hi!|Hello!` are understood
+as well, so Red muscle memory doesn't quietly create a tag called `simple`.
+Aliases only apply to the prefix form — Discord has no aliases for slash
+commands, so those stay under `/tag`.
+
 See [Migrating from Red](#migrating-from-red) to bring your existing ones over.
 
 ### Moderation
@@ -307,6 +323,80 @@ and:
 
 `/leveling setxp` and `/leveling reset` fix things up. Level rewards stack —
 reaching level 10 also grants any level 5 reward that was missed.
+
+### Culture Coin (cc)
+
+The server currency. On by default, per-server, and every member gets a wallet
+the first time they do anything.
+
+```
+/balance                  # yours, or /balance @someone
+/daily                    # once a day, with a streak bonus
+/work                     # an odd job, once an hour
+/pay @someone 250         # hand over cc
+/richest                  # who is hoarding
+```
+
+Chatting also pays a couple of cc a minute. Members start with 500 cc.
+
+Tuning it needs **Manage Server**:
+
+```
+/economy rate 2 6 60          # 2-6 cc per message, at most once a minute
+/economy rewards 250 25 220 3600   # daily, streak bonus, top work pay, work cooldown
+/economy start 500            # what a new wallet opens with
+/economy ignore #spam         # no cc for chatting here
+/economy give @someone 1000   # mint · also take, set, reset
+/economy toggle off           # switch the whole thing off
+```
+
+`/economy history` reads the ledger: every cc that moves is recorded, so a
+payout that looks wrong can be traced. Chat income is hidden unless you ask for
+it with `chat:True`.
+
+### Culshi — prediction markets
+
+Kalshi, for your friends. A market is one yes/no question about something
+someone might do, and the price is the server's collective guess at whether it
+will happen.
+
+```
+/culshi create "Will Sean actually stream on Friday?" about:@Sean closes:3d
+/culshi                             # what's trading
+/culshi view 3                      # the panel, with buttons
+/culshi buy 3 yes 10                # 10 YES contracts
+/culshi sell 3 yes 4                # cash out early
+/culshi positions                   # what you're holding, marked to market
+/culshi resolve 3 yes               # settle it · or `no`, or `cancel`
+```
+
+**A contract pays 100 cc if its side is right, and nothing if it isn't**, so a
+price between 1 and 99 cc reads directly as a percentage. Buying YES pushes the
+price up, and selling pushes it back down — being early and right is worth
+something even before the question settles.
+
+There is no order book waiting for someone to take the other side. Whoever
+opens a market seeds an automated market maker with cc (1,000 by default), and
+that maker quotes both sides at all times. The seed is not a fee: it is the
+maker's bankroll, it is the most the maker can lose, and whatever is left of it
+comes back at settlement. A bigger seed means a deeper market whose price moves
+less per trade.
+
+Because the maker's loss is capped at the seed, **a market can only ever pay out
+the cc that went into it**. Culshi redistributes; it never mints.
+
+Market messages keep their buttons after a restart, so a market opened on Monday
+is still tradeable on Friday.
+
+**Who settles a market:** whoever opened it, anyone with **Manage Server**, or a
+role set with `/culshi steward @role`. Never the person the market is *about* —
+you don't get to grade your own market. `/culshi resolve <id> cancel` refunds
+everyone at what they paid, for a question that turned out to be unanswerable.
+
+Trading stops at the deadline on its own, and the bot says so in the channel.
+Other bits: `/culshi about @someone`, `/culshi pnl` (who is actually good at
+this), `/culshi close <id>` to end trading early, and `/culshi limits` /
+`/culshi channel` / `/culshi toggle` for **Manage Server**.
 
 ### Fun and utility
 
@@ -402,6 +492,9 @@ exactly what will be created, what's being renamed, and what's being skipped —
 
 `source_server` is only needed when the file covers more than one server; the
 error message lists the IDs it found. Importing needs Manage Server.
+
+Afterwards, `!cc list` shows everything that came across, and `!cc add` / `!cc
+del` keep working the way they did under Red.
 
 There's also a CLI, if you'd rather not upload anything — it previews by default
 and only writes with `--apply`:
@@ -512,7 +605,7 @@ overwrites can remove even when the server-level role has them.
 
 ```fish
 make venv     # Python 3.12 venv via uv, matching the container
-make test     # 149 tests, no network or token needed
+make test     # 258 tests, no network or token needed
 ```
 
 The same suite runs in CI on every push and pull request, and a failing run
@@ -523,6 +616,11 @@ playback clock), the XP curve, template rendering, the database layer and its
 migrations, and — most usefully — loading every cog and converting the whole
 slash-command tree to the payload Discord receives on sync. That last one
 catches broken decorators and bad annotations without needing a token.
+
+The money has its own tests, and they are property tests rather than examples:
+random sequences of trades have to leave every market able to cover its winners,
+and a market has to settle with exactly as much cc in the server as it started
+with. If Culshi could mint cc, those are the tests that would say so.
 
 Python 3.12 is deliberate: 3.13 removed `audioop` from the standard library,
 which discord.py's voice and volume handling depends on.
@@ -541,6 +639,11 @@ bot/
     queue.py      the per-guild queue
     player.py     one asyncio task drives one voice connection
     views.py      now-playing buttons
+  economy/
+    bank.py       wallets and the cc ledger
+    lmsr.py       Culshi's market maker: prices, costs, solvency
+    markets.py    creating, trading, and settling markets
+    views.py      the market panel and its buttons
   cogs/           one module per feature area
   utils/          embeds, checks, formatting, pagination, presence
 tests/            stdlib unittest, no dev dependencies

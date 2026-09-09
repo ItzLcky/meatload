@@ -47,6 +47,7 @@ class TestExtensionLoading(unittest.IsolatedAsyncioTestCase):
         for expected in (
             "play", "skip", "queue", "tag create", "ban", "rank", "poll", "config prefix",
             "config cleanup", "status set",
+            "balance", "pay", "daily", "culshi create", "culshi buy", "culshi resolve",
         ):
             with self.subTest(command=expected):
                 self.assertIn(expected, names)

@@ -27,6 +27,8 @@ EXTENSIONS = (
     "bot.cogs.fun",
     "bot.cogs.utility",
     "bot.cogs.leveling",
+    "bot.cogs.economy",
+    "bot.cogs.culshi",
 )
 
 

@@ -19,6 +19,8 @@ COG_EMOJI = {
     "Fun": "🎲",
     "Utility": "🔧",
     "Leveling": "📈",
+    "Economy": "🪙",
+    "Culshi": "📊",
     "Admin": "⚙️",
 }
 

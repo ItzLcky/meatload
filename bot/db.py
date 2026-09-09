@@ -40,6 +40,21 @@ GUILD_SETTINGS: frozenset[str] = frozenset(
         "xp_min",
         "xp_max",
         "xp_cooldown",
+        "economy_enabled",
+        "cc_start_balance",
+        "cc_chat_min",
+        "cc_chat_max",
+        "cc_chat_cooldown",
+        "cc_daily_amount",
+        "cc_daily_streak_bonus",
+        "cc_work_min",
+        "cc_work_max",
+        "cc_work_cooldown",
+        "culshi_enabled",
+        "culshi_channel_id",
+        "culshi_steward_role_id",
+        "culshi_min_subsidy",
+        "culshi_max_open",
     }
 )
 
