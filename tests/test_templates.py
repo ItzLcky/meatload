@@ -3,7 +3,14 @@
 import types
 import unittest
 
-from bot.cogs.tags import NAME_RE, pick_all_responses, pick_response, render as render_tag
+from bot.cogs.tags import (
+    NAME_RE,
+    pick_all_responses,
+    pick_response,
+    render as render_tag,
+    split_red_create_syntax,
+)
+from bot.utils.errors import FriendlyError
 from bot.cogs.welcome import render as render_welcome
 
 
@@ -127,6 +134,53 @@ class TestTagNames(unittest.TestCase):
         for name in ("", "has space", "UPPER", "a" * 33, "emoji😀", "semi;colon"):
             with self.subTest(name=name):
                 self.assertIsNone(NAME_RE.match(name))
+
+
+class TestRedCreateSyntax(unittest.TestCase):
+    """`cc add simple <name> <text>` is muscle memory for anyone leaving Red.
+
+    The cog only applies this under the `cc`/`customcom` spelling of the group,
+    so `!tag create simple <anything>` still makes a tag called `simple`.
+    """
+
+    def test_simple_keyword_is_unwrapped(self):
+        self.assertEqual(
+            split_red_create_syntax("simple", "greet Hi there"), ("simple", "greet", "Hi there")
+        )
+
+    def test_random_keyword_is_unwrapped(self):
+        self.assertEqual(
+            split_red_create_syntax("random", "greet Hi!|Hello!"), ("random", "greet", "Hi!|Hello!")
+        )
+
+    def test_keyword_matching_ignores_case_and_spacing(self):
+        self.assertEqual(
+            split_red_create_syntax(" Simple ", "  greet   Hi there  "),
+            ("simple", "greet", "Hi there"),
+        )
+
+    def test_ordinary_creation_is_untouched(self):
+        self.assertEqual(split_red_create_syntax("greet", "Hi there"), (None, "greet", "Hi there"))
+
+    def test_content_that_cannot_be_a_name_is_left_alone(self):
+        """No name follows the keyword, so it was the tag's own name."""
+        self.assertEqual(
+            split_red_create_syntax("simple", "it's that easy"), (None, "simple", "it's that easy")
+        )
+        self.assertEqual(
+            split_red_create_syntax("random", "🎲 rolls a die"),
+            (None, "random", "🎲 rolls a die"),
+        )
+
+    def test_bare_red_form_asks_instead_of_guessing(self):
+        """`!cc add random greet` reads two ways, so neither is assumed."""
+        with self.assertRaises(FriendlyError):
+            split_red_create_syntax("random", "greet")
+
+    def test_the_error_echoes_the_prefix_that_was_used(self):
+        with self.assertRaises(FriendlyError) as caught:
+            split_red_create_syntax("simple", "greet", "?cc ")
+        self.assertIn("?cc add greet", str(caught.exception))
 
 
 class TestWelcomeRendering(unittest.TestCase):

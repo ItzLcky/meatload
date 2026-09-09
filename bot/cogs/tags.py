@@ -4,6 +4,11 @@ A tag is a named snippet the server can create at runtime. They are invoked
 either through `/tag show <name>` or, more naturally, straight off the prefix:
 `!welcome`. The prefix form is wired up from the command-not-found handler, so
 tags never shadow a real command.
+
+For servers coming from Red, the whole group answers to `cc` as well, and the
+subcommand names match Red's: `cc list`, `cc add`, `cc del`, `cc edit`,
+`cc show`. Aliases only apply to the prefix form — Discord has no such thing
+for slash commands, so those stay under `/tag`.
 """
 
 from __future__ import annotations
@@ -37,6 +42,14 @@ MAX_IMPORT_BYTES = 8 * 1024 * 1024
 
 # Red-style positional arguments: {0} is the first word typed after the name.
 POSITIONAL_RE = re.compile(r"\{(\d{1,2})\}")
+
+# Red spells creation as `[p]cc create simple <name> <text>` / `[p]cc create
+# random <name>`. We have no such sub-sub-commands, so the keyword is unwrapped
+# instead of being taken for the tag's name — see `split_red_create_syntax`.
+# That only happens under the Red spelling of the group, which keeps `!tag
+# create simple ...` free to make a tag genuinely called `simple`.
+RED_CREATE_KEYWORDS = ("simple", "random")
+RED_GROUP_ALIASES = ("cc", "customcom")
 
 VARIABLE_HELP = (
     "**Who ran it** `{user}` mention • `{user.name}` display name • "
@@ -109,6 +122,39 @@ def render(content: str, ctx: commands.Context, uses: int, args: str) -> str:
     )
 
 
+def split_red_create_syntax(
+    name: str, content: str, usage: str = "!cc "
+) -> tuple[str | None, str, str]:
+    """Unwrap Red's `cc create simple|random <name> <text>` into ours.
+
+    Someone migrating from Red types `!cc add simple hello Hi!`, which would
+    otherwise create a tag literally called `simple` whose response starts with
+    the name they actually wanted. Returns `(keyword, name, content)` with the
+    keyword consumed, or `(None, name, content)` when that first word was meant
+    as the tag's own name after all.
+
+    Raises when the keyword is followed by a bare name and nothing else
+    (`!cc add random greet`, Red's interactive form): both readings are
+    plausible there, so guessing either way would be worse than asking.
+    """
+    keyword = name.strip().lower()
+    if keyword not in RED_CREATE_KEYWORDS:
+        return None, name, content
+
+    candidate, _, rest = content.strip().partition(" ")
+    if not NAME_RE.match(candidate.lower()):
+        # Not a usable name, so `simple`/`random` really was the tag name.
+        return None, name, content
+    if not rest.strip():
+        raise FriendlyError(
+            f"`{keyword} {candidate}` is Red's syntax, which needs the response on the "
+            f"same line here:\n"
+            f"• `{usage}add {candidate} <text>` — one fixed response\n"
+            f"• `{usage}random {candidate} Hi!|Hello!|Hey` — a random one each time"
+        )
+    return keyword, candidate, rest.strip()
+
+
 class Tags(commands.Cog):
     """Server-defined custom commands."""
 
@@ -151,6 +197,18 @@ class Tags(commands.Cog):
         await self._send_tag(ctx, row, rest.strip())
         return True
 
+    def _invoked_group(self, ctx: commands.Context) -> str:
+        """Which spelling of the group was typed: `tag`, `t`, `cc`, `customcom`."""
+        return ctx.invoked_parents[0].lower() if ctx.invoked_parents else "tag"
+
+    def _group_usage(self, ctx: commands.Context) -> str:
+        """`!cc ` or `!tag `, whichever the caller actually typed.
+
+        Examples in error messages should echo the spelling the server uses, so
+        a Red refugee working in `cc` isn't told to go and run `tag` instead.
+        """
+        return f"{ctx.clean_prefix}{self._invoked_group(ctx)} "
+
     def _validate_name(self, name: str) -> str:
         name = name.strip().lower()
         if not NAME_RE.match(name):
@@ -163,12 +221,22 @@ class Tags(commands.Cog):
 
     # ── commands ─────────────────────────────────────────────────────────────
 
-    @commands.hybrid_group(name="tag", aliases=["t"], fallback="show", invoke_without_command=True)
+    @commands.hybrid_group(
+        name="tag", aliases=["t", "cc", "customcom"], fallback="show", invoke_without_command=True
+    )
     @app_commands.describe(name="Which tag to show", args="Optional text, available as {args}")
     @commands.guild_only()
     async def tag(self, ctx: commands.Context, name: str, *, args: str = "") -> None:
         """Show a custom command."""
         row = await self._lookup(ctx.guild.id, name)
+        if row is None and name.strip().lower() == "show" and args:
+            # `!cc show hello` is how Red spells it. `show` is this group's
+            # app-command fallback, so it can't also be a real subcommand —
+            # unwrap it here, but only once a tag genuinely called `show` has
+            # been ruled out.
+            name, _, rest = args.strip().partition(" ")
+            args = rest.strip()
+            row = await self._lookup(ctx.guild.id, name)
         if row is None:
             suggestions = await self.bot.db.fetchall(
                 "SELECT name FROM tags WHERE guild_id = ? AND name LIKE ? ORDER BY uses DESC LIMIT 5",
@@ -185,12 +253,20 @@ class Tags(commands.Cog):
     @checks.can_manage_tags()
     async def tag_create(self, ctx: commands.Context, name: str, *, content: str) -> None:
         """Create a custom command."""
+        if self._invoked_group(ctx) in RED_GROUP_ALIASES:
+            keyword, name, content = split_red_create_syntax(name, content, self._group_usage(ctx))
+            if keyword == "random":
+                await self._create_random(ctx, name, content)
+                return
+
         name = self._validate_name(name)
         if len(content) > MAX_CONTENT:
             raise FriendlyError(f"Tag content is limited to {MAX_CONTENT} characters.")
 
         if await self._lookup(ctx.guild.id, name) is not None:
-            raise FriendlyError(f"**{name}** already exists. Use `{ctx.clean_prefix}tag edit` to change it.")
+            raise FriendlyError(
+                f"**{name}** already exists. Use `{self._group_usage(ctx)}edit` to change it."
+            )
 
         now = time.time()
         await self.bot.db.execute(
@@ -220,7 +296,7 @@ class Tags(commands.Cog):
         )
         await ctx.send(embed=embeds.success(f"Updated **{row['name']}**."))
 
-    @tag.command(name="delete", aliases=["remove", "rm"])
+    @tag.command(name="delete", aliases=["del", "remove", "rm"])
     @app_commands.describe(name="Tag to delete")
     @checks.can_manage_tags()
     async def tag_delete(self, ctx: commands.Context, *, name: str) -> None:
@@ -284,7 +360,7 @@ class Tags(commands.Cog):
             )
         await ctx.send(embed=embed)
 
-    @tag.command(name="all", aliases=["list"])
+    @tag.command(name="all", aliases=["list", "ls"])
     async def tag_all(self, ctx: commands.Context) -> None:
         """List every custom command on this server."""
         rows = await self.bot.db.fetchall(
@@ -294,7 +370,7 @@ class Tags(commands.Cog):
             await ctx.send(
                 embed=embeds.info(
                     f"No custom commands yet. Make one with "
-                    f"`{ctx.clean_prefix}tag create <name> <content>`.\n\nVariables: {VARIABLE_HELP}"
+                    f"`{self._group_usage(ctx)}add <name> <content>`.\n\nVariables: {VARIABLE_HELP}"
                 )
             )
             return
@@ -335,12 +411,16 @@ class Tags(commands.Cog):
     @checks.can_manage_tags()
     async def tag_random(self, ctx: commands.Context, name: str, *, responses: str) -> None:
         """Create a custom command that answers with a random response."""
+        await self._create_random(ctx, name, responses)
+
+    async def _create_random(self, ctx: commands.Context, name: str, responses: str) -> None:
+        """Shared by `tag random` and Red's `cc add random <name> <a>|<b>`."""
         name = self._validate_name(name)
         options = [part.strip() for part in responses.split("|") if part.strip()]
         if len(options) < 2:
             raise FriendlyError(
                 "Give at least two responses separated by `|`, for example:\n"
-                f"`{ctx.clean_prefix}tag random greet Hi!|Hello!|Hey there`"
+                f"`{self._group_usage(ctx)}random greet Hi!|Hello!|Hey there`"
             )
 
         content = json.dumps(options)

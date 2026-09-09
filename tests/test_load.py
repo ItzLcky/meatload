@@ -46,10 +46,27 @@ class TestExtensionLoading(unittest.IsolatedAsyncioTestCase):
         names = {command.qualified_name for command in self.bot.walk_commands()}
         for expected in (
             "play", "skip", "queue", "tag create", "ban", "rank", "poll", "config prefix",
-            "config cleanup",
+            "config cleanup", "status set",
         ):
             with self.subTest(command=expected):
                 self.assertIn(expected, names)
+
+    async def test_red_custom_command_spellings_resolve(self):
+        """Servers migrating from Red drive tags through `cc`, not `tag`."""
+        expected = {
+            "cc": "tag",
+            "cc list": "tag all",
+            "cc add": "tag create",
+            "cc del": "tag delete",
+            "cc edit": "tag edit",
+            "cc random": "tag random",
+            "customcom list": "tag all",
+        }
+        for typed, resolved in expected.items():
+            with self.subTest(command=typed):
+                command = self.bot.get_command(typed)
+                self.assertIsNotNone(command, f"{typed} does not resolve")
+                self.assertEqual(command.qualified_name, resolved)
 
     async def test_no_duplicate_command_names(self):
         seen = set()
