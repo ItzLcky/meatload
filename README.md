@@ -316,6 +316,29 @@ reaching level 10 also grants any level 5 reward that was missed.
 
 Reminders live in the database, so they survive restarts.
 
+### Server settings
+
+`/config` shows everything below at a glance.
+
+| Command | What it does |
+| --- | --- |
+| `/config prefix ?` | Change the text prefix. Mentioning the bot always works too. |
+| `/config modlog #channel` | Mirror moderation actions into a channel. |
+| `/config djrole @DJ` | Restrict disruptive music commands. |
+| `/config tagrole @Role` | Let a role manage custom commands. |
+| `/config cleanup on` | Delete command messages after they run. |
+
+**Command cleanup.** Off by default, and Manage Server to change. With
+`/config cleanup on`, the bot deletes the message that ran a text command once
+the command has answered, so a busy channel keeps the replies instead of both
+halves of every exchange. Custom commands (tags) are cleaned up too.
+
+Three things it deliberately leaves alone: slash commands, which never post a
+message to delete; commands that *failed*, so the error still has the mistyped
+command above it to point at; and anything at all if the bot is missing **Manage
+Messages** — `/config cleanup on` says so at the time if that permission isn't
+there yet.
+
 ### Owner-only
 
 Maintenance is text-only, since `sync` is what creates the slash commands:
