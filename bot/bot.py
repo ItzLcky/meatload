@@ -99,6 +99,30 @@ class MusicBot(commands.Bot):
         await super().close()
         await self.db.close()
 
+    async def on_command_completion(self, ctx: commands.Context) -> None:
+        await self.cleanup_invocation(ctx)
+
+    async def cleanup_invocation(self, ctx: commands.Context) -> None:
+        """Delete the message that ran a command, if the server asked for it.
+
+        Only successful invocations are cleaned up. A command that failed keeps
+        its message on screen, because the error underneath it ("you're missing
+        the `member` argument") only reads as an answer next to the question.
+        """
+        if ctx.guild is None or ctx.interaction is not None:
+            return  # slash commands leave no message behind to delete
+
+        config = await self.db.get_guild_config(ctx.guild.id)
+        if not config.get("delete_command_messages"):
+            return
+
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            # Missing Manage Messages, or something deleted it first. Either
+            # way it isn't worth interrupting a command that already worked.
+            log.debug("Could not clean up the invocation of %s", ctx.command, exc_info=True)
+
     async def on_ready(self) -> None:
         log.info(
             "Connected as %s (%s) in %d guild(s)",
@@ -136,6 +160,9 @@ class MusicBot(commands.Bot):
         if isinstance(error, commands.CommandNotFound):
             tags = self.get_cog("Tags")
             if tags is not None and await tags.try_invoke_prefix_tag(ctx):
+                # Tags never reach on_command_completion — they aren't real
+                # commands — but to the person typing they are, so tidy up here.
+                await self.cleanup_invocation(ctx)
                 return
             return  # unknown prefix commands stay silent
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -119,6 +120,7 @@ class Admin(commands.Cog):
             f"**DJ role:** {role('dj_role_id')}\n"
             f"**Tag manager role:** {role('tag_manager_role_id')}\n"
             f"**Autorole:** {role('autorole_id')}\n"
+            f"**Command cleanup:** {'on' if settings.get('delete_command_messages') else 'off'}\n"
             f"**Music volume:** {settings.get('music_volume') or self.bot.config.music_default_volume}%\n"
             f"**Leveling:** {'on' if settings.get('leveling_enabled') else 'off'}",
             title=f"Settings for {ctx.guild.name}",
@@ -186,6 +188,41 @@ class Admin(commands.Cog):
             await ctx.send(
                 embed=embeds.success("Tag manager role removed — Manage Messages is required again.")
             )
+
+
+    # The checks are repeated here rather than inherited from the group: with
+    # `invoke_without_command`, discord.py doesn't run a group's checks for
+    # prefix invocations of its children.
+    @config.command(name="cleanup", aliases=["deletecommands"])
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    @app_commands.describe(state="on to delete command messages after they run, off to leave them")
+    async def config_cleanup(self, ctx: commands.Context, state: Literal["on", "off"]) -> None:
+        """Delete the message that ran a text command, to keep channels tidy."""
+        enabled = state == "on"
+        await self.bot.db.set_guild_setting(
+            ctx.guild.id, "delete_command_messages", 1 if enabled else 0
+        )
+
+        if not enabled:
+            await ctx.send(embed=embeds.success("Command cleanup is **off** — messages stay put."))
+            return
+
+        note = (
+            "Command cleanup is **on** — I'll delete the message that ran a command "
+            "once it has answered.\n\n"
+            "Slash commands are unaffected (they never leave a message), and a command "
+            "that *failed* keeps its message, so the error still has something to point at."
+        )
+        if not ctx.guild.me.guild_permissions.manage_messages:
+            await ctx.send(
+                embed=embeds.warning(
+                    f"{note}\n\nI don't have **Manage Messages** yet, though, so nothing will "
+                    "actually be deleted until you give me that permission."
+                )
+            )
+            return
+        await ctx.send(embed=embeds.success(note))
 
 
 async def setup(bot) -> None:

@@ -32,6 +32,7 @@ GUILD_SETTINGS: frozenset[str] = frozenset(
         "autorole_id",
         "dj_role_id",
         "tag_manager_role_id",
+        "delete_command_messages",
         "music_volume",
         "leveling_enabled",
         "levelup_channel_id",

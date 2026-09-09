@@ -44,7 +44,10 @@ class TestExtensionLoading(unittest.IsolatedAsyncioTestCase):
 
     async def test_expected_commands_exist(self):
         names = {command.qualified_name for command in self.bot.walk_commands()}
-        for expected in ("play", "skip", "queue", "tag create", "ban", "rank", "poll", "config prefix"):
+        for expected in (
+            "play", "skip", "queue", "tag create", "ban", "rank", "poll", "config prefix",
+            "config cleanup",
+        ):
             with self.subTest(command=expected):
                 self.assertIn(expected, names)
 
