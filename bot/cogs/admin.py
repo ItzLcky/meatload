@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..utils import embeds
+from ..utils import embeds, presence
 from ..utils.errors import FriendlyError
 
 log = logging.getLogger(__name__)
@@ -95,6 +96,119 @@ class Admin(commands.Cog):
         """Disconnect cleanly. Docker's `restart: unless-stopped` brings it back."""
         await ctx.send(embed=embeds.neutral("Shutting down. 👋"))
         await self.bot.close()
+
+    # ── presence ─────────────────────────────────────────────────────────────
+    # Owner-only like the block above, but hybrid: as slash commands the type
+    # and state arguments become pick-lists. `default_permissions` only keeps
+    # `/status` out of non-admins' command pickers — `is_owner` is what actually
+    # enforces it, and it is repeated on every subcommand because a group's
+    # checks don't run for prefix invocations of its children.
+
+    @commands.hybrid_group(name="status", fallback="show", invoke_without_command=True)
+    @commands.is_owner()
+    @app_commands.default_permissions(administrator=True)
+    async def status(self, ctx: commands.Context) -> None:
+        """Show the status the bot is currently displaying."""
+        await ctx.send(embed=embeds.info(self._presence_description(), title="Bot status"))
+
+    @status.command(name="set")
+    @commands.is_owner()
+    @app_commands.describe(
+        kind="How the status reads. `custom` shows the text on its own, with no verb.",
+        text=f"The status text, up to {presence.MAX_ACTIVITY_NAME} characters.",
+    )
+    async def status_set(
+        self,
+        ctx: commands.Context,
+        kind: Literal["playing", "listening", "watching", "competing", "custom"],
+        *,
+        text: str,
+    ) -> None:
+        """Set what the bot appears to be doing, e.g. `status set watching the queue`."""
+        await self._change_presence(ctx, kind=kind, name=self._clean(text))
+
+    @status.command(name="streaming")
+    @commands.is_owner()
+    @app_commands.describe(
+        url="A twitch.tv or youtube.com link — Discord only shows the live badge for those.",
+        text="What the bot is streaming.",
+    )
+    async def status_streaming(self, ctx: commands.Context, url: str, *, text: str) -> None:
+        """Show the bot as live, with a clickable link."""
+        if not url.startswith(("https://", "http://")):
+            raise FriendlyError("The stream URL has to start with `https://`.")
+        await self._change_presence(ctx, kind="streaming", name=self._clean(text), url=url)
+
+    @status.command(name="presence", aliases=["dot"])
+    @commands.is_owner()
+    @app_commands.describe(state="The coloured dot next to the bot's name.")
+    async def status_presence(
+        self, ctx: commands.Context, state: Literal["online", "idle", "dnd", "invisible"]
+    ) -> None:
+        """Set the online / idle / do-not-disturb dot."""
+        await self._change_presence(ctx, state=state)
+
+    @status.command(name="clear")
+    @commands.is_owner()
+    async def status_clear(self, ctx: commands.Context) -> None:
+        """Remove the status text, leaving just the dot."""
+        await self._change_presence(ctx, kind=presence.NO_ACTIVITY, name=None)
+
+    @staticmethod
+    def _clean(text: str) -> str:
+        text = text.strip()
+        if not text:
+            raise FriendlyError("Give me some text to show.")
+        if len(text) > presence.MAX_ACTIVITY_NAME:
+            raise FriendlyError(
+                f"Status text has to be {presence.MAX_ACTIVITY_NAME} characters or fewer — "
+                f"that one was {len(text)}."
+            )
+        return text
+
+    def _presence_description(self) -> str:
+        return (
+            f"**Activity:** {presence.describe(self.bot.activity)}\n"
+            f"**Presence:** {presence.describe_status(self.bot.status)}"
+        )
+
+    async def _change_presence(
+        self,
+        ctx: commands.Context,
+        *,
+        kind: str | None = None,
+        name: str | None = None,
+        url: str | None = None,
+        state: str | None = None,
+    ) -> None:
+        """Change one half of the presence, keep the other, and remember both.
+
+        Discord replaces the whole presence on every update, so whatever this
+        call isn't changing has to be sent again unchanged.
+        """
+        activity = self.bot.activity if kind is None else presence.build_activity(kind, name, url)
+        status = self.bot.status if state is None else presence.STATUSES[state]
+
+        try:
+            await self.bot.change_presence(activity=activity, status=status)
+        except (discord.HTTPException, TypeError) as exc:
+            raise FriendlyError(f"Discord wouldn't take that status: {exc}")
+
+        # Also update what gets sent on the next handshake, so a reconnect
+        # doesn't quietly put the .env status back.
+        self.bot.activity = activity
+        self.bot.status = status
+
+        stored: dict[str, str | None] = {}
+        if kind is not None:
+            stored.update(activity_type=kind, activity_name=name, activity_url=url)
+        if state is not None:
+            stored["presence_status"] = state
+        await self.bot.db.set_bot_settings(stored)
+
+        await ctx.send(
+            embed=embeds.success(f"Status updated — it sticks across restarts.\n\n{self._presence_description()}")
+        )
 
     # ── server settings ──────────────────────────────────────────────────────
 

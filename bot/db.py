@@ -42,12 +42,24 @@ GUILD_SETTINGS: frozenset[str] = frozenset(
     }
 )
 
+# Bot-wide settings, stored as key/value rows in `bot_settings`. Same idea as
+# GUILD_SETTINGS: unknown keys are refused rather than written.
+BOT_SETTINGS: frozenset[str] = frozenset(
+    {
+        "activity_type",
+        "activity_name",
+        "activity_url",
+        "presence_status",
+    }
+)
+
 
 class Database:
     def __init__(self, path: str) -> None:
         self.path = path
         self._conn: aiosqlite.Connection | None = None
         self._guild_cache: dict[int, dict[str, Any]] = {}
+        self._bot_cache: dict[str, str | None] | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -151,3 +163,26 @@ class Database:
 
     def invalidate_guild(self, guild_id: int) -> None:
         self._guild_cache.pop(guild_id, None)
+
+    # ── bot-wide settings ────────────────────────────────────────────────────
+
+    async def get_bot_settings(self) -> dict[str, str | None]:
+        """Every stored bot-wide setting. Missing keys mean "never set"."""
+        if self._bot_cache is None:
+            rows = await self.fetchall("SELECT key, value FROM bot_settings")
+            self._bot_cache = {row["key"]: row["value"] for row in rows}
+        return dict(self._bot_cache)
+
+    async def set_bot_settings(self, values: dict[str, str | None]) -> None:
+        """Write several bot-wide settings at once; a presence is one unit."""
+        unknown = set(values) - BOT_SETTINGS
+        if unknown:
+            raise KeyError(f"{sorted(unknown)} are not configurable bot settings")
+        if not values:
+            return
+        await self.executemany(
+            "INSERT INTO bot_settings (key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            list(values.items()),
+        )
+        self._bot_cache = None

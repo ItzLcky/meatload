@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 
 from .config import Config
 from .db import Database
-from .utils import embeds
+from .utils import embeds, presence
 from .utils.errors import FriendlyError
 
 log = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ class MusicBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.db.connect()
         await self.db.migrate()
+        await self._restore_presence()
 
         for extension in EXTENSIONS:
             try:
@@ -93,6 +94,22 @@ class MusicBot(commands.Bot):
             )
 
         self.heartbeat.start()
+
+    async def _restore_presence(self) -> None:
+        """Re-apply a presence set with `status`, overriding the one from .env.
+
+        Discord only learns the presence we send during the gateway handshake,
+        so this runs from setup_hook — before that handshake — and the saved
+        status is live from the first moment instead of flickering into place.
+        """
+        settings = await self.db.get_bot_settings()
+        if "activity_type" in settings:
+            self.activity = presence.build_activity(
+                settings["activity_type"], settings.get("activity_name"), settings.get("activity_url")
+            )
+        status = presence.STATUSES.get(settings.get("presence_status") or "")
+        if status is not None:
+            self.status = status
 
     async def close(self) -> None:
         self.heartbeat.cancel()

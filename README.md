@@ -318,12 +318,27 @@ Reminders live in the database, so they survive restarts.
 
 ### Owner-only
 
-Text commands only, since `sync` is what creates the slash commands:
+Maintenance is text-only, since `sync` is what creates the slash commands:
 
 - `!sync` — push slash commands to the current server. `!sync global` for
   everywhere, `!sync clear` to wipe this server's.
 - `!reload music` — reload a cog after editing code, no restart.
 - `!shutdown` — clean exit. Docker's `restart: unless-stopped` brings it back.
+
+`status` changes what the bot itself is showing, and works either way:
+
+```
+/status set watching       the queue     # Playing / Listening to / Watching /
+/status set custom         back at 6pm   #   Competing in / plain custom text
+/status streaming https://twitch.tv/you  going live
+/status presence dnd                     # online | idle | dnd | invisible
+/status clear                            # drop the text, keep the dot
+/status show                             # what's showing right now
+```
+
+Whatever you set is saved and re-applied on the next start, so it outlives a
+restart or a `docker compose up -d`. `ACTIVITY_NAME` / `ACTIVITY_TYPE` in `.env`
+are only the starting point, used until the first `status` command.
 
 Owners come from `OWNER_IDS` in `.env`, or default to the application owner.
 
@@ -504,7 +519,7 @@ bot/
     player.py     one asyncio task drives one voice connection
     views.py      now-playing buttons
   cogs/           one module per feature area
-  utils/          embeds, checks, formatting, pagination
+  utils/          embeds, checks, formatting, pagination, presence
 tests/            stdlib unittest, no dev dependencies
 ```
 

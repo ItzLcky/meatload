@@ -14,15 +14,10 @@ from dataclasses import dataclass, field
 import discord
 from dotenv import load_dotenv
 
+from .utils.presence import ACTIVITY_TYPES, build_activity
+
 _TRUE = {"1", "true", "yes", "y", "on"}
 _SPLIT = re.compile(r"[,\s]+")
-
-_ACTIVITY_TYPES = {
-    "playing": discord.ActivityType.playing,
-    "listening": discord.ActivityType.listening,
-    "watching": discord.ActivityType.watching,
-    "competing": discord.ActivityType.competing,
-}
 
 
 def _str(key: str, default: str = "") -> str:
@@ -52,6 +47,12 @@ def _id_set(key: str) -> set[int]:
     return {int(part) for part in _SPLIT.split(_str(key)) if part.isdigit()}
 
 
+def _activity_type() -> str:
+    """ACTIVITY_TYPE, falling back to `listening` if it is misspelled."""
+    value = _str("ACTIVITY_TYPE", "listening").lower()
+    return value if value in ACTIVITY_TYPES else "listening"
+
+
 class ConfigError(RuntimeError):
     """Raised when the bot cannot start with the configuration it was given."""
 
@@ -65,7 +66,7 @@ class Config:
     log_level: str
     database_path: str
     activity_name: str
-    activity_type: discord.ActivityType
+    activity_type: str
 
     music_idle_timeout: int
     music_alone_timeout: int
@@ -85,10 +86,8 @@ class Config:
         return bool(self.spotify_client_id and self.spotify_client_secret)
 
     @property
-    def activity(self) -> discord.Activity | None:
-        if not self.activity_name:
-            return None
-        return discord.Activity(type=self.activity_type, name=self.activity_name)
+    def activity(self) -> discord.BaseActivity | None:
+        return build_activity(self.activity_type, self.activity_name)
 
 
 def load_config() -> Config:
@@ -116,7 +115,7 @@ def load_config() -> Config:
         log_level=_str("LOG_LEVEL", "INFO").upper() or "INFO",
         database_path=database_path,
         activity_name=_str("ACTIVITY_NAME"),
-        activity_type=_ACTIVITY_TYPES.get(_str("ACTIVITY_TYPE", "listening").lower(), discord.ActivityType.listening),
+        activity_type=_activity_type(),
         music_idle_timeout=_int("MUSIC_IDLE_TIMEOUT", 300, minimum=30),
         music_alone_timeout=_int("MUSIC_ALONE_TIMEOUT", 60, minimum=5),
         music_default_volume=_int("MUSIC_DEFAULT_VOLUME", 50, minimum=0, maximum=200),
