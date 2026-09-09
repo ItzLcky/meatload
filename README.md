@@ -401,6 +401,7 @@ this), `/culshi close <id>` to end trading early, and `/culshi limits` /
 ### Fun and utility
 
 `/poll` (live vote bars), `/8ball`, `/roll 2d20+3`, `/coinflip`, `/choose`,
+`/inspireme` (a fresh poster from [InspiroBot](https://inspirobot.me/)),
 `/say`, `/remindme 2h feed the cat`, `/reminders`, `/ping`, `/botinfo`,
 `/avatar`, `/userinfo`, `/serverinfo`, `/roleinfo`.
 

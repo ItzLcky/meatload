@@ -45,8 +45,8 @@ class TestExtensionLoading(unittest.IsolatedAsyncioTestCase):
     async def test_expected_commands_exist(self):
         names = {command.qualified_name for command in self.bot.walk_commands()}
         for expected in (
-            "play", "skip", "queue", "tag create", "ban", "rank", "poll", "config prefix",
-            "config cleanup", "status set",
+            "play", "skip", "queue", "tag create", "ban", "rank", "poll", "inspireme",
+            "config prefix", "config cleanup", "status set",
             "balance", "pay", "daily", "culshi create", "culshi buy", "culshi resolve",
         ):
             with self.subTest(command=expected):
