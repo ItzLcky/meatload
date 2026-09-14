@@ -79,7 +79,7 @@ class Config:
     spotify_client_id: str
     spotify_client_secret: str
 
-    tenor_api_key: str
+    klipy_api_key: str
 
     heartbeat_path: str = field(default="/app/data/heartbeat")
 
@@ -89,7 +89,7 @@ class Config:
 
     @property
     def gif_search_enabled(self) -> bool:
-        return bool(self.tenor_api_key)
+        return bool(self.klipy_api_key)
 
     @property
     def activity(self) -> discord.BaseActivity | None:
@@ -131,6 +131,6 @@ def load_config() -> Config:
         ytdlp_extractor_args=_str("YTDLP_EXTRACTOR_ARGS"),
         spotify_client_id=_str("SPOTIFY_CLIENT_ID"),
         spotify_client_secret=_str("SPOTIFY_CLIENT_SECRET"),
-        tenor_api_key=_str("TENOR_API_KEY"),
+        klipy_api_key=_str("KLIPY_API_KEY"),
         heartbeat_path=os.path.join(os.path.dirname(database_path) or ".", "heartbeat"),
     )

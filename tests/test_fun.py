@@ -63,16 +63,20 @@ class FakeSession:
         return None
 
 
-async def make_cog(session, tenor_api_key: str = "test-key") -> Fun:
-    bot = types.SimpleNamespace(config=types.SimpleNamespace(tenor_api_key=tenor_api_key))
+async def make_cog(session, klipy_api_key: str = "test-key") -> Fun:
+    bot = types.SimpleNamespace(config=types.SimpleNamespace(klipy_api_key=klipy_api_key))
     cog = Fun(bot)
     await cog.session.close()  # swap the real session out for the fake
     cog.session = session
     return cog
 
 
-def tenor_payload(*urls: str, key: str = "gif") -> dict:
-    return {"results": [{"media_formats": {key: {"url": url}}} for url in urls]}
+def klipy_payload(*urls: str, size: str = "md") -> dict:
+    """A search response shaped like KLIPY's: data.data[].file.<size>.gif.url."""
+    return {
+        "result": True,
+        "data": {"data": [{"file": {size: {"gif": {"url": url}}}} for url in urls]},
+    }
 
 
 class TestFetchPoster(unittest.IsolatedAsyncioTestCase):
@@ -116,16 +120,16 @@ class TestFetchPoster(unittest.IsolatedAsyncioTestCase):
 class TestSearchGif(unittest.IsolatedAsyncioTestCase):
     async def test_returns_one_of_the_results(self):
         urls = [
-            "https://media.tenor.com/abc/cat.gif",
-            "https://media1.tenor.com/def/cat.gif",
+            "https://static.klipy.com/abc/cat.gif",
+            "https://cdn.klipy.com/def/cat.gif",
         ]
-        cog = await make_cog(FakeSession(FakeResponse(payload=tenor_payload(*urls))))
+        cog = await make_cog(FakeSession(FakeResponse(payload=klipy_payload(*urls))))
         self.assertIn(await cog._search_gif("cat"), urls)
 
     async def test_picks_randomly_across_calls(self):
         """A fixed pick would make `gifr cat` post the same GIF every time."""
-        urls = [f"https://media.tenor.com/{index}/cat.gif" for index in range(10)]
-        cog = await make_cog(FakeSession(FakeResponse(payload=tenor_payload(*urls))))
+        urls = [f"https://static.klipy.com/{index}/cat.gif" for index in range(10)]
+        cog = await make_cog(FakeSession(FakeResponse(payload=klipy_payload(*urls))))
         seen = {await cog._search_gif("cat") for _ in range(40)}
         self.assertGreater(len(seen), 1)
 
@@ -139,59 +143,83 @@ class TestSearchGif(unittest.IsolatedAsyncioTestCase):
                 return super().get(url, **kwargs)
 
         cog = await make_cog(
-            RecordingSession(FakeResponse(payload=tenor_payload("https://media.tenor.com/a/b.gif")))
+            RecordingSession(FakeResponse(payload=klipy_payload("https://static.klipy.com/a/b.gif")))
         )
         await cog._search_gif("happy dance")
         self.assertEqual(captured["params"]["q"], "happy dance")
-        self.assertEqual(captured["params"]["key"], "test-key")
-        self.assertEqual(captured["params"]["contentfilter"], "high")
+        self.assertEqual(captured["params"]["content_filter"], "high")
+        self.assertEqual(captured["params"]["format_filter"], "gif")
 
-    async def test_falls_back_to_a_smaller_format(self):
-        payload = tenor_payload("https://media.tenor.com/a/small.gif", key="tinygif")
+    async def test_the_api_key_travels_in_the_path_not_a_query_parameter(self):
+        """KLIPY authenticates by path segment, so the URL carries the secret."""
+        captured = {}
+
+        class RecordingSession(FakeSession):
+            def get(self, url, **kwargs):
+                captured["url"] = url
+                captured["params"] = kwargs.get("params", {})
+                return super().get(url, **kwargs)
+
+        cog = await make_cog(
+            RecordingSession(FakeResponse(payload=klipy_payload("https://static.klipy.com/a/b.gif"))),
+            klipy_api_key="secret/key",
+        )
+        await cog._search_gif("cat")
+        self.assertIn("secret%2Fkey", captured["url"])  # escaped, not a new path segment
+        self.assertNotIn("secret/key", captured["url"])
+        self.assertNotIn("key", captured["params"])
+
+    async def test_falls_back_to_another_size(self):
+        payload = klipy_payload("https://static.klipy.com/a/small.gif", size="xs")
         cog = await make_cog(FakeSession(FakeResponse(payload=payload)))
-        self.assertEqual(await cog._search_gif("cat"), "https://media.tenor.com/a/small.gif")
+        self.assertEqual(await cog._search_gif("cat"), "https://static.klipy.com/a/small.gif")
 
     async def test_skips_results_pointing_at_another_host(self):
-        payload = tenor_payload(
+        payload = klipy_payload(
             "https://evil.example.com/a.gif",
-            "https://media.tenor.com/ok/cat.gif",
+            "https://static.klipy.com/ok/cat.gif",
         )
         cog = await make_cog(FakeSession(FakeResponse(payload=payload)))
-        self.assertEqual(await cog._search_gif("cat"), "https://media.tenor.com/ok/cat.gif")
+        self.assertEqual(await cog._search_gif("cat"), "https://static.klipy.com/ok/cat.gif")
 
-    async def test_a_lookalike_host_is_not_tenor(self):
-        payload = tenor_payload("https://tenor.com.evil.example/a.gif")
+    async def test_a_lookalike_host_is_not_klipy(self):
+        payload = klipy_payload("https://klipy.com.evil.example/a.gif")
         cog = await make_cog(FakeSession(FakeResponse(payload=payload)))
         with self.assertRaises(FriendlyError):
             await cog._search_gif("cat")
 
     async def test_a_malformed_result_is_skipped_not_fatal(self):
         payload = {
-            "results": [
-                "not a dict",
-                {"media_formats": None},
-                {"media_formats": {"gif": {}}},
-                {"media_formats": {"gif": {"url": "https://media.tenor.com/ok/cat.gif"}}},
-            ]
+            "result": True,
+            "data": {
+                "data": [
+                    "not a dict",
+                    {"file": None},
+                    {"file": {"md": {"gif": {}}}},
+                    {"file": {"md": {"gif": {"url": "https://static.klipy.com/ok/cat.gif"}}}},
+                ]
+            },
         }
         cog = await make_cog(FakeSession(FakeResponse(payload=payload)))
-        self.assertEqual(await cog._search_gif("cat"), "https://media.tenor.com/ok/cat.gif")
+        self.assertEqual(await cog._search_gif("cat"), "https://static.klipy.com/ok/cat.gif")
 
     async def test_no_results_becomes_a_friendly_error(self):
-        cog = await make_cog(FakeSession(FakeResponse(payload={"results": []})))
+        cog = await make_cog(FakeSession(FakeResponse(payload={"result": True, "data": {"data": []}})))
         with self.assertRaises(FriendlyError):
             await cog._search_gif("asdkjhasd")
 
     async def test_a_missing_api_key_explains_the_setup(self):
-        cog = await make_cog(FakeSession(), tenor_api_key="")
+        cog = await make_cog(FakeSession(), klipy_api_key="")
         with self.assertRaises(FriendlyError) as caught:
             await cog._search_gif("cat")
-        self.assertIn("TENOR_API_KEY", str(caught.exception))
+        self.assertIn("KLIPY_API_KEY", str(caught.exception))
 
     async def test_a_rejected_key_becomes_a_friendly_error(self):
-        cog = await make_cog(FakeSession(FakeResponse(status=403)))
-        with self.assertRaises(FriendlyError):
-            await cog._search_gif("cat")
+        for status in (401, 403, 404):
+            with self.subTest(status=status):
+                cog = await make_cog(FakeSession(FakeResponse(status=status)))
+                with self.assertRaises(FriendlyError):
+                    await cog._search_gif("cat")
 
     async def test_an_http_error_becomes_a_friendly_error(self):
         response = FakeResponse(error=aiohttp.ClientResponseError(None, (), status=503))

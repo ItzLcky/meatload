@@ -402,7 +402,7 @@ this), `/culshi close <id>` to end trading early, and `/culshi limits` /
 
 `/poll` (live vote bars), `/8ball`, `/roll 2d20+3`, `/coinflip`, `/choose`,
 `/inspireme` (a fresh poster from [InspiroBot](https://inspirobot.me/)),
-`/gifr <keyword>` (a random GIF for that keyword),
+`/gifr <keyword>` (a random GIF for that keyword, from [KLIPY](https://klipy.com/)),
 `/say`, `/remindme 2h feed the cat`, `/reminders`, `/ping`, `/botinfo`,
 `/avatar`, `/userinfo`, `/serverinfo`, `/roleinfo`.
 

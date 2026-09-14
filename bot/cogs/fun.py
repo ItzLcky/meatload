@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 import re
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import aiohttp
 import discord
@@ -31,13 +31,17 @@ POLL_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
 INSPIROBOT_API = "https://inspirobot.me/api?generate=true"
 INSPIROBOT_HOST = "inspirobot.me"
 
-TENOR_API = "https://tenor.googleapis.com/v2/search"
-TENOR_HOST = "tenor.com"
-# Tenor's own randomisation only shuffles the page it hands back, so ask for a
-# batch and pick from it — that is what makes two searches for `cat` differ.
-TENOR_RESULTS = 30
-# Widest to narrowest; Discord shows whichever we hand it, smaller loads sooner.
-TENOR_FORMATS = ("gif", "mediumgif", "tinygif")
+# The app key goes in the path rather than a query parameter, so it must never
+# reach a log line or an error message.
+KLIPY_API = "https://api.klipy.com/api/v1/{key}/gifs/search"
+KLIPY_HOST = "klipy.com"
+# per_page caps at 50. Nothing in the API returns a random result, so the whole
+# page is the pool a random pick comes from — that is what makes two searches
+# for `cat` differ.
+KLIPY_RESULTS = 50
+# KLIPY renders every GIF at four sizes. `md` is 498px at ~2MB, which matches
+# what Discord actually displays; the rest are fallbacks in preference order.
+KLIPY_SIZES = ("md", "sm", "hd", "xs")
 
 
 class Fun(commands.Cog):
@@ -149,46 +153,47 @@ class Fun(commands.Cog):
         url = await self._search_gif(keyword)
         embed = embeds.info(f"[Open full size]({url})", title=f"🔎 {keyword}")
         embed.set_image(url=url)
-        embed.set_footer(text="via Tenor")
+        embed.set_footer(text="via KLIPY")
         await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     async def _search_gif(self, keyword: str) -> str:
-        """Search Tenor and return one GIF URL at random.
+        """Search KLIPY and return one GIF URL at random.
 
-        Results are filtered to Tenor's own hosts before anything is embedded,
-        for the same reason InspiroBot's reply is: the URL comes from outside.
+        URLs are checked against KLIPY's own hosts before anything is embedded,
+        for the same reason InspiroBot's reply is: they come from outside.
         """
-        api_key = self.bot.config.tenor_api_key
+        api_key = self.bot.config.klipy_api_key
         if not api_key:
             raise FriendlyError(
-                "GIF search isn't set up. The bot owner needs a free Tenor key in `.env` "
-                "as `TENOR_API_KEY` — see <https://developers.google.com/tenor/guides/quickstart>."
+                "GIF search isn't set up. The bot owner needs a free KLIPY key in `.env` "
+                "as `KLIPY_API_KEY` — see <https://klipy.com/developers>."
             )
 
         params = {
             "q": keyword,
-            "key": api_key,
-            "limit": str(TENOR_RESULTS),
-            "media_filter": ",".join(TENOR_FORMATS),
-            "contentfilter": "high",  # G-rated, whatever channel this runs in
-            "random": "true",
+            "per_page": str(KLIPY_RESULTS),
+            "content_filter": "high",  # strictest, whatever channel this runs in
+            "format_filter": "gif",
         }
         try:
             async with self.session.get(
-                TENOR_API, params=params, timeout=aiohttp.ClientTimeout(total=10)
+                KLIPY_API.format(key=quote(api_key, safe="")),
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
-                if response.status in (400, 401, 403):
+                # The key is a path segment, so a bad one reads as a missing page.
+                if response.status in (400, 401, 403, 404):
                     raise FriendlyError(
-                        "Tenor turned down my API key. The bot owner should check `TENOR_API_KEY`."
+                        "KLIPY turned down my API key. The bot owner should check `KLIPY_API_KEY`."
                     )
                 response.raise_for_status()
                 payload = await response.json(content_type=None)
         except asyncio.TimeoutError as error:
-            raise FriendlyError("Tenor took too long to answer. Try again in a moment.") from error
+            raise FriendlyError("KLIPY took too long to answer. Try again in a moment.") from error
         except (aiohttp.ClientError, ValueError) as error:
-            raise FriendlyError("Tenor isn't answering right now. Try again in a moment.") from error
+            raise FriendlyError("KLIPY isn't answering right now. Try again in a moment.") from error
 
-        urls = _tenor_gif_urls(payload)
+        urls = _klipy_gif_urls(payload)
         if not urls:
             raise FriendlyError(f"No GIFs came back for **{truncate(escape(keyword), 80)}**.")
         return random.choice(urls)
@@ -232,32 +237,36 @@ class Fun(commands.Cog):
                 pass
 
 
-def _tenor_gif_urls(payload: object) -> list[str]:
-    """Pull the usable GIF URLs out of a Tenor search response.
+def _klipy_gif_urls(payload: object) -> list[str]:
+    """Pull the usable GIF URLs out of a KLIPY search response.
 
-    Anything malformed, or pointing somewhere other than Tenor, is dropped
-    rather than raising: one odd result shouldn't cost the whole search.
+    Results are nested `data.data[].file.<size>.gif.url`. Anything malformed,
+    or pointing somewhere other than KLIPY, is dropped rather than raising: one
+    odd result shouldn't cost the whole search. URLs are taken exactly as given
+    — KLIPY asks that their delivery parameters be left intact.
     """
-    results = payload.get("results") if isinstance(payload, dict) else None
+    body = payload.get("data") if isinstance(payload, dict) else None
+    items = body.get("data") if isinstance(body, dict) else None
     urls = []
-    for result in results or []:
-        if not isinstance(result, dict):
+    for item in items or []:
+        if not isinstance(item, dict):
             continue
-        formats = result.get("media_formats")
-        if not isinstance(formats, dict):
+        sizes = item.get("file")
+        if not isinstance(sizes, dict):
             continue
-        for name in TENOR_FORMATS:
-            media = formats.get(name)
-            url = media.get("url") if isinstance(media, dict) else None
-            if isinstance(url, str) and _is_tenor_url(url.strip()):
+        for size in KLIPY_SIZES:
+            variant = sizes.get(size)
+            gif = variant.get("gif") if isinstance(variant, dict) else None
+            url = gif.get("url") if isinstance(gif, dict) else None
+            if isinstance(url, str) and _is_klipy_url(url.strip()):
                 urls.append(url.strip())
                 break
     return urls
 
 
-def _is_tenor_url(url: str) -> bool:
+def _is_klipy_url(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
-    return host == TENOR_HOST or host.endswith(f".{TENOR_HOST}")
+    return host == KLIPY_HOST or host.endswith(f".{KLIPY_HOST}")
 
 
 class PollView(discord.ui.View):
