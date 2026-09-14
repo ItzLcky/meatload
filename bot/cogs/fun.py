@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from ..utils import embeds
 from ..utils.errors import FriendlyError
-from ..utils.formatting import truncate
+from ..utils.formatting import escape, truncate
 
 DICE_RE = re.compile(r"^(\d{0,3})d(\d{1,4})([+-]\d{1,4})?$", re.IGNORECASE)
 
@@ -30,6 +30,14 @@ POLL_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
 
 INSPIROBOT_API = "https://inspirobot.me/api?generate=true"
 INSPIROBOT_HOST = "inspirobot.me"
+
+TENOR_API = "https://tenor.googleapis.com/v2/search"
+TENOR_HOST = "tenor.com"
+# Tenor's own randomisation only shuffles the page it hands back, so ask for a
+# batch and pick from it — that is what makes two searches for `cat` differ.
+TENOR_RESULTS = 30
+# Widest to narrowest; Discord shows whichever we hand it, smaller loads sooner.
+TENOR_FORMATS = ("gif", "mediumgif", "tinygif")
 
 
 class Fun(commands.Cog):
@@ -128,6 +136,63 @@ class Fun(commands.Cog):
             raise FriendlyError("InspiroBot sent back something I don't recognise. Try again.")
         return url
 
+    @commands.hybrid_command(name="gifr", aliases=["gif"])
+    @app_commands.describe(keyword="What the GIF should be of")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def gifr(self, ctx: commands.Context, *, keyword: str) -> None:
+        """Post a random GIF for a keyword."""
+        keyword = truncate(keyword.strip(), 100, suffix="")
+        if not keyword:
+            raise FriendlyError("Tell me what to look for, like `gifr cat`.")
+
+        await ctx.defer()
+        url = await self._search_gif(keyword)
+        embed = embeds.info(f"[Open full size]({url})", title=f"🔎 {keyword}")
+        embed.set_image(url=url)
+        embed.set_footer(text="via Tenor")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    async def _search_gif(self, keyword: str) -> str:
+        """Search Tenor and return one GIF URL at random.
+
+        Results are filtered to Tenor's own hosts before anything is embedded,
+        for the same reason InspiroBot's reply is: the URL comes from outside.
+        """
+        api_key = self.bot.config.tenor_api_key
+        if not api_key:
+            raise FriendlyError(
+                "GIF search isn't set up. The bot owner needs a free Tenor key in `.env` "
+                "as `TENOR_API_KEY` — see <https://developers.google.com/tenor/guides/quickstart>."
+            )
+
+        params = {
+            "q": keyword,
+            "key": api_key,
+            "limit": str(TENOR_RESULTS),
+            "media_filter": ",".join(TENOR_FORMATS),
+            "contentfilter": "high",  # G-rated, whatever channel this runs in
+            "random": "true",
+        }
+        try:
+            async with self.session.get(
+                TENOR_API, params=params, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status in (400, 401, 403):
+                    raise FriendlyError(
+                        "Tenor turned down my API key. The bot owner should check `TENOR_API_KEY`."
+                    )
+                response.raise_for_status()
+                payload = await response.json(content_type=None)
+        except asyncio.TimeoutError as error:
+            raise FriendlyError("Tenor took too long to answer. Try again in a moment.") from error
+        except (aiohttp.ClientError, ValueError) as error:
+            raise FriendlyError("Tenor isn't answering right now. Try again in a moment.") from error
+
+        urls = _tenor_gif_urls(payload)
+        if not urls:
+            raise FriendlyError(f"No GIFs came back for **{truncate(escape(keyword), 80)}**.")
+        return random.choice(urls)
+
     @commands.hybrid_command(name="poll")
     @app_commands.describe(
         question="What you're asking",
@@ -165,6 +230,34 @@ class Fun(commands.Cog):
                 await ctx.message.delete()
             except discord.HTTPException:
                 pass
+
+
+def _tenor_gif_urls(payload: object) -> list[str]:
+    """Pull the usable GIF URLs out of a Tenor search response.
+
+    Anything malformed, or pointing somewhere other than Tenor, is dropped
+    rather than raising: one odd result shouldn't cost the whole search.
+    """
+    results = payload.get("results") if isinstance(payload, dict) else None
+    urls = []
+    for result in results or []:
+        if not isinstance(result, dict):
+            continue
+        formats = result.get("media_formats")
+        if not isinstance(formats, dict):
+            continue
+        for name in TENOR_FORMATS:
+            media = formats.get(name)
+            url = media.get("url") if isinstance(media, dict) else None
+            if isinstance(url, str) and _is_tenor_url(url.strip()):
+                urls.append(url.strip())
+                break
+    return urls
+
+
+def _is_tenor_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host == TENOR_HOST or host.endswith(f".{TENOR_HOST}")
 
 
 class PollView(discord.ui.View):

@@ -81,6 +81,10 @@ services:
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
 
+      # ── Optional: powers /gifr, a random GIF for a keyword ────────────────
+      # Free key from https://developers.google.com/tenor/guides/quickstart
+      TENOR_API_KEY: ${TENOR_API_KEY:-}
+
     # No inbound ports: the bot only makes outbound connections to Discord.
     stop_grace_period: 20s
 
