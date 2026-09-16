@@ -150,11 +150,13 @@ class Fun(commands.Cog):
             raise FriendlyError("Tell me what to look for, like `gifr cat`.")
 
         await ctx.defer()
-        url = await self._search_gif(keyword)
-        embed = embeds.info(f"[Open full size]({url})", title=f"🔎 {keyword}")
-        embed.set_image(url=url)
-        embed.set_footer(text="via KLIPY")
-        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        # The bare link and nothing else: KLIPY's URLs end in .gif, so Discord
+        # renders it inline, and the result looks like a GIF someone posted
+        # rather than a bot announcing one.
+        await ctx.send(
+            await self._search_gif(keyword),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def _search_gif(self, keyword: str) -> str:
         """Search KLIPY and return one GIF URL at random.
