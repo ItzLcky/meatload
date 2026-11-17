@@ -27,8 +27,8 @@ shell:          ## Open a shell inside the running container
 test:           ## Run the test suite locally (needs `make venv` first)
 	PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -t . -v
 
-venv:           ## Create a local Python 3.12 dev environment
-	uv venv --python 3.12 .venv && VIRTUAL_ENV=.venv uv pip install -r requirements.txt
+venv:           ## Create a local Python 3.13 dev environment
+	uv venv --python 3.13 .venv && VIRTUAL_ENV=.venv uv pip install -r requirements.txt
 
 image:          ## Build the image for a Docker UI (Arcane/Portainer) to run
 	docker build -t discord-bot:latest .

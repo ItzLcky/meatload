@@ -126,8 +126,9 @@ Only needed if you left `DEV_GUILD_IDS` empty: send `!sync` in any channel.
 
 `.github/workflows/ci.yml` runs the tests on every push and, when they pass on
 `main`, builds the image and publishes it to GitHub Container Registry as
-`ghcr.io/itzlcky/meatload:latest`. That removes the SSH-and-build step entirely:
-push code, then hit redeploy in Arcane.
+`ghcr.io/itzlcky/meatload:latest`. It also rebuilds from scratch every Monday so
+security fixes in the base image and dependencies land without a push. That
+removes the SSH-and-build step entirely: push code, then hit redeploy in Arcane.
 
 Because the repo is private, so is the package, so whatever pulls it has to
 authenticate. Create a token at *Settings → Developer settings → Personal access
@@ -606,7 +607,7 @@ overwrites can remove even when the server-level role has them.
 ## Development
 
 ```fish
-make venv     # Python 3.12 venv via uv, matching the container
+make venv     # Python 3.13 venv via uv, matching the container
 make test     # 258 tests, no network or token needed
 ```
 
@@ -624,8 +625,9 @@ random sequences of trades have to leave every market able to cover its winners,
 and a market has to settle with exactly as much cc in the server as it started
 with. If Culshi could mint cc, those are the tests that would say so.
 
-Python 3.12 is deliberate: 3.13 removed `audioop` from the standard library,
-which discord.py's voice and volume handling depends on.
+The bot runs on Python 3.13. That release removed `audioop` from the standard
+library, which discord.py's voice and volume handling depends on, but
+discord.py installs the `audioop-lts` replacement on 3.13+ automatically.
 
 ```
 bot/

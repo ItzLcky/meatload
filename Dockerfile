@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Python 3.12 is deliberate: 3.13 removed `audioop` from the stdlib, which
-# discord.py's voice/volume path depends on. Staying on 3.12 avoids that whole
-# class of breakage.
-FROM python:3.12-slim-bookworm
+# 3.13 dropped `audioop` from the stdlib, but discord.py's voice/volume path
+# still works: on 3.13+ it pulls in `audioop-lts` as a dependency. The tag
+# floats on purpose: CI's weekly rebuild then picks up new 3.13 patch releases
+# and base-image security fixes.
+FROM python:3.13-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -17,13 +18,15 @@ ENV PYTHONUSERBASE=/app/data/.python
 
 # ffmpeg   -> audio transcoding for voice
 # libopus0 -> discord.py loads libopus via ctypes at runtime
-# ca-certificates / curl -> HTTPS to YouTube et al.
+# ca-certificates -> HTTPS to YouTube et al.
+# The upgrade pulls in Debian security fixes the base image hasn't caught up
+# with yet; without it the image ships whatever openssl/perl the tag was cut on.
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
       libopus0 \
       ca-certificates \
-      curl \
       tini \
  && rm -rf /var/lib/apt/lists/*
 
