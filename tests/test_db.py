@@ -2,7 +2,8 @@ import os
 import tempfile
 import unittest
 
-from bot.db import Database
+from bot import db as db_module
+from bot.db import Database, DatabaseKeyError
 
 
 class TestDatabase(unittest.IsolatedAsyncioTestCase):
@@ -66,13 +67,11 @@ class TestDatabase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.db.fetchval("SELECT COUNT(*) FROM playlist_tracks"), 0)
 
     async def test_tag_names_are_unique_per_guild(self):
-        import aiosqlite
-
         await self.db.execute(
             "INSERT INTO tags (guild_id, name, content, owner_id, created_at, updated_at)"
             " VALUES (1, 'hi', 'a', 1, 0, 0)"
         )
-        with self.assertRaises(aiosqlite.IntegrityError):
+        with self.assertRaises(db_module.IntegrityError):
             await self.db.execute(
                 "INSERT INTO tags (guild_id, name, content, owner_id, created_at, updated_at)"
                 " VALUES (1, 'hi', 'b', 1, 0, 0)"
@@ -143,6 +142,106 @@ class TestSchemaUpgrade(unittest.IsolatedAsyncioTestCase):
             ),
             1,
         )
+
+
+KEY = "a-test-key-that-is-long-enough"
+
+
+class TestEncryption(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self._dir.name, "secret.db")
+
+    async def asyncTearDown(self):
+        self._dir.cleanup()
+
+    async def _write_tag(self, db: Database, content: str) -> None:
+        await db.execute(
+            "INSERT INTO tags (guild_id, name, content, owner_id, created_at, updated_at)"
+            " VALUES (1, 'secret', ?, 1, 0, 0)",
+            (content,),
+        )
+
+    def _raw_bytes(self) -> bytes:
+        data = b""
+        for suffix in ("", "-wal"):
+            if os.path.exists(self.path + suffix):
+                with open(self.path + suffix, "rb") as handle:
+                    data += handle.read()
+        return data
+
+    async def test_data_on_disk_is_not_readable(self):
+        db = Database(self.path, KEY)
+        await db.connect()
+        await db.migrate()
+        await self._write_tag(db, "the-plaintext-marker")
+        # Check before closing too, so the WAL is covered as well as the main file.
+        self.assertNotIn(b"the-plaintext-marker", self._raw_bytes())
+        await db.close()
+        self.assertNotIn(b"the-plaintext-marker", self._raw_bytes())
+        self.assertNotIn(b"SQLite format 3", self._raw_bytes()[:16])
+
+    async def test_reopens_with_the_right_key(self):
+        db = Database(self.path, KEY)
+        await db.connect()
+        await db.migrate()
+        await self._write_tag(db, "kept")
+        await db.close()
+
+        db = Database(self.path, KEY)
+        await db.connect()
+        self.assertEqual(await db.fetchval("SELECT content FROM tags"), "kept")
+        await db.close()
+
+    async def test_wrong_or_missing_key_is_refused(self):
+        db = Database(self.path, KEY)
+        await db.connect()
+        await db.migrate()
+        await db.close()
+
+        with self.assertRaises(DatabaseKeyError):
+            await Database(self.path, KEY + "x").connect()
+        with self.assertRaises(DatabaseKeyError):
+            await Database(self.path).connect()
+
+    async def test_quotes_in_the_key_are_handled(self):
+        key = "it's a 'quoted' key; DROP TABLE x"
+        db = Database(self.path, key)
+        await db.connect()
+        await db.migrate()
+        await db.close()
+        db = Database(self.path, key)
+        await db.connect()
+        self.assertIsNotNone(await db.fetchval("SELECT COUNT(*) FROM tags"))
+        await db.close()
+
+    async def test_existing_plaintext_database_is_encrypted_in_place(self):
+        db = Database(self.path)  # an install from before encryption
+        await db.connect()
+        await db.migrate()
+        await self._write_tag(db, "pre-existing-marker")
+        await db.close()
+        self.assertIn(b"pre-existing-marker", self._raw_bytes())
+
+        db = Database(self.path, KEY)
+        await db.connect()
+        self.assertEqual(await db.fetchval("SELECT content FROM tags"), "pre-existing-marker")
+        await db.migrate()  # nothing reapplied: the migration history came along
+        await db.close()
+
+        self.assertNotIn(b"pre-existing-marker", self._raw_bytes())
+        self.assertFalse(os.path.exists(self.path + ".encrypting"))
+        with self.assertRaises(DatabaseKeyError):
+            await Database(self.path).connect()
+
+    @unittest.skipIf(os.name != "posix", "file modes are POSIX-only")
+    async def test_file_is_private_to_its_owner(self):
+        db = Database(self.path, KEY)
+        await db.connect()
+        await db.migrate()
+        mode = os.stat(self.path).st_mode & 0o777
+        await db.close()
+        self.assertEqual(mode, 0o600)
 
 
 if __name__ == "__main__":

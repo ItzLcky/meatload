@@ -51,7 +51,7 @@ then check it: `docker run --rm hello-world`.
 
 ```fish
 cp .env.example .env
-$EDITOR .env   # paste DISCORD_TOKEN, set DEV_GUILD_IDS to your server's ID
+$EDITOR .env   # paste DISCORD_TOKEN and a DATABASE_KEY, set DEV_GUILD_IDS to your server's ID
 
 docker compose up -d --build
 docker compose logs -f bot
@@ -102,6 +102,7 @@ and set these variables in its environment editor:
 | Variable | Value |
 | --- | --- |
 | `DISCORD_TOKEN` | your bot token — the stack refuses to start without it |
+| `DATABASE_KEY` | a long random secret that encrypts the database — see [Database encryption](#database-encryption) |
 | `DEV_GUILD_IDS` | your server ID, so slash commands appear instantly |
 
 That's it. Everything else has a sensible default. There are no host directories
@@ -674,6 +675,28 @@ make backup                    # -> data/bot-20260908-143000.db
 
 To move the bot to another machine, copy `.env` and `data/` and run
 `docker compose up -d --build`. Nothing else is stateful.
+
+### Database encryption
+
+`data/bot.db` is encrypted with AES-256 by [SQLCipher](https://www.zetetic.net/sqlcipher/),
+using `DATABASE_KEY` from `.env`. The bot will not start without the key. Every page of the
+database and its write-ahead log is encrypted on disk, so a copied `bot.db`, a backup
+or a leaked volume snapshot can't be read without the key. The database files are
+also limited to their owner (mode `600`), and deleted rows are zeroed, not left in
+free pages.
+
+- **Generate a key:** `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+- **Upgrading an existing install:** add `DATABASE_KEY` to `.env` and restart. The old
+  unencrypted database is encrypted in place on first start, and the log says so.
+- **Back up the key separately**, in a password manager for example. Backups made with
+  `make backup` are encrypted too and need the same key. **There is no recovery
+  without it.** Don't change the key once it is set: the bot refuses to open the
+  database with a different one.
+- **What this protects against:** the database file leaving the machine. It does not
+  protect against someone who can read `.env` or the running container's
+  environment, because the key is there. Keep `.env` private (`chmod 600 .env`).
+- **Inspecting the database by hand:** use the `sqlcipher` CLI, not `sqlite3`, and
+  run `PRAGMA key = '<your key>';` first.
 
 The container runs as a non-root user, exposes no ports (Discord connections are
 outbound only), and logs are capped at 5 x 10 MB so they can't fill the disk.

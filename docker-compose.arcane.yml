@@ -50,6 +50,10 @@ services:
     environment:
       # ── Required ──────────────────────────────────────────────────────────
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in the stack environment}
+      # Encrypts the database on disk. Generate with
+      #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+      # and keep a copy elsewhere: losing it means losing the database.
+      DATABASE_KEY: ${DATABASE_KEY:?set DATABASE_KEY in the stack environment}
 
       # ── Core ──────────────────────────────────────────────────────────────
       # Your server's ID. Slash commands appear instantly instead of taking an

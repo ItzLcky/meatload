@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 os.environ.setdefault("DISCORD_TOKEN", "offline-test-token")
+os.environ.setdefault("DATABASE_KEY", "offline-test-database-key")
 
 from bot.bot import EXTENSIONS, MusicBot  # noqa: E402
 from bot.config import load_config  # noqa: E402

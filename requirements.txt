@@ -1,4 +1,6 @@
 discord.py[voice]>=2.5,<3
 yt-dlp>=2026.7.4
 aiosqlite>=0.20
+# SQLCipher build of sqlite3: encrypts the database at rest (see bot/db.py).
+sqlcipher3-binary>=0.6
 python-dotenv>=1.0

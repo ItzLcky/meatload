@@ -59,12 +59,13 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Config:
-    token: str
+    token: str = field(repr=False)
     default_prefix: str
     owner_ids: set[int]
     dev_guild_ids: set[int]
     log_level: str
     database_path: str
+    database_key: str = field(repr=False)
     activity_name: str
     activity_type: str
 
@@ -107,6 +108,18 @@ def load_config() -> Config:
         )
 
     database_path = _str("DATABASE_PATH", "/app/data/bot.db")
+    database_key = _str("DATABASE_KEY")
+    if not database_key:
+        raise ConfigError(
+            "DATABASE_KEY is not set. The database is encrypted with it, so the bot "
+            "refuses to start without one. Generate a key with:\n"
+            "  python3 -c \"import secrets; print(secrets.token_urlsafe(32))\"\n"
+            "put it in .env as DATABASE_KEY=..., and keep a copy somewhere safe: "
+            "losing it means losing the database. An existing unencrypted database "
+            "is encrypted automatically on the next start."
+        )
+    if len(database_key) < 16:
+        raise ConfigError("DATABASE_KEY is too short; use at least 16 random characters.")
     cookies = _str("YTDLP_COOKIES_FILE")
     if cookies and not os.path.exists(cookies):
         # Not fatal: a missing cookies file just means we fall back to
@@ -120,6 +133,7 @@ def load_config() -> Config:
         dev_guild_ids=_id_set("DEV_GUILD_IDS"),
         log_level=_str("LOG_LEVEL", "INFO").upper() or "INFO",
         database_path=database_path,
+        database_key=database_key,
         activity_name=_str("ACTIVITY_NAME"),
         activity_type=_activity_type(),
         music_idle_timeout=_int("MUSIC_IDLE_TIMEOUT", 300, minimum=30),

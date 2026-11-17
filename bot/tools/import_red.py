@@ -21,6 +21,8 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .. import redimport
 from ..db import Database
 
@@ -137,7 +139,8 @@ def locate_settings(source: str) -> Path:
 
 
 async def apply(db_path: str, guild_id: int, report: redimport.ImportReport, overwrite: bool) -> None:
-    db = Database(db_path)
+    # Same key the bot uses: the database is encrypted with DATABASE_KEY.
+    db = Database(db_path, os.getenv("DATABASE_KEY") or None)
     await db.connect()
     try:
         await db.migrate()
@@ -187,6 +190,7 @@ async def apply(db_path: str, guild_id: int, report: redimport.ImportReport, ove
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()  # picks up DATABASE_KEY and DATABASE_PATH from .env
     parser = argparse.ArgumentParser(
         prog="python -m bot.tools.import_red",
         description="Import Red-DiscordBot custom commands into this bot.",

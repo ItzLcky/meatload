@@ -1,6 +1,11 @@
 #!/usr/bin/env sh
 set -e
 
+# Everything the bot writes (database, heartbeat, yt-dlp cache) is private to
+# the user it runs as. The database also chmods itself, but this covers files
+# SQLite creates later, like the WAL.
+umask 077
+
 DATA_DIR="$(dirname "${DATABASE_PATH:-/app/data/bot.db}")"
 
 # The data directory is a bind mount from the host, so its owner is whatever

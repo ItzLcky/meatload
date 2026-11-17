@@ -62,7 +62,7 @@ class MusicBot(commands.Bot):
             activity=config.activity,
         )
         self.config = config
-        self.db = Database(config.database_path)
+        self.db = Database(config.database_path, config.database_key)
         self.started_at = time.time()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
