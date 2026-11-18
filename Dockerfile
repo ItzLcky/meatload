@@ -3,8 +3,10 @@
 # 3.13 dropped `audioop` from the stdlib, but discord.py's voice/volume path
 # still works: on 3.13+ it pulls in `audioop-lts` as a dependency. The tag
 # floats on purpose: CI's weekly rebuild then picks up new 3.13 patch releases
-# and base-image security fixes.
-FROM python:3.13-slim-bookworm
+# and base-image security fixes. Stay on a stable Python: pre-release tags
+# like 3.16-rc scan cleaner but are alphas, and sqlcipher3-binary has no wheels
+# for them.
+FROM python:3.13-slim-trixie
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

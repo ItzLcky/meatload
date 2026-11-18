@@ -79,7 +79,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Always fetch the current python:3.13-slim-bookworm rather than a
+          # Always fetch the current python:3.13-slim-trixie rather than a
           # stale local copy of the tag.
           pull: true
           # Scheduled and manual runs exist to pick up security fixes, which the
